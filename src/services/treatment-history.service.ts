@@ -1,15 +1,24 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { TreatmentHistory } from '@/schemas/treatment-history.schema';
 import { CreateTreatmentHistoryDto } from '@/decorations/dto/create-treatment-history.dto';
 import { UpdateTreatmentHistoryDto } from '@/decorations/dto/update-treatment-history.dto';
+import { StudentService } from './student.service';
+import { HealthRecordService } from './health-record.service';
+import { ParentService } from './parent.service';
+import { ParentStudent } from '@/schemas/parent-student.schema';
+import { Student } from '@/schemas/student.schema';
+import { UpdateTreatmentStatusDto } from '@/decorations/dto/update-treatment-history.dto';
 
 @Injectable()
 export class TreatmentHistoryService {
   constructor(
     @InjectModel(TreatmentHistory.name)
     private treatmentHistoryModel: Model<TreatmentHistory>,
+    private parentService: ParentService,
+    private studentService: StudentService,
   ) {}
 
   async create(
@@ -18,7 +27,11 @@ export class TreatmentHistoryService {
     const createdTreatmentHistory = new this.treatmentHistoryModel(
       createTreatmentHistoryDto,
     );
-    return createdTreatmentHistory.save();
+    const result = await createdTreatmentHistory.save();
+
+
+    
+    return result;
   }
 
   async findAll(): Promise<TreatmentHistory[]> {
@@ -26,7 +39,6 @@ export class TreatmentHistoryService {
       .find()
       .populate('student')
       .populate('staff')
-      .populate('record')
       .exec();
   }
 
@@ -35,7 +47,6 @@ export class TreatmentHistoryService {
       .findById(id)
       .populate('student')
       .populate('staff')
-      .populate('record')
       .exec();
 
     if (!treatmentHistory) {
@@ -44,12 +55,10 @@ export class TreatmentHistoryService {
 
     return treatmentHistory;
   }
-
   async findByStudentId(studentId: string): Promise<TreatmentHistory[]> {
     return this.treatmentHistoryModel
       .find({ student: studentId })
       .populate('staff')
-      .populate('record')
       .exec();
   }
 
@@ -57,8 +66,25 @@ export class TreatmentHistoryService {
     return this.treatmentHistoryModel
       .find({ staff: staffId })
       .populate('student')
-      .populate('record')
       .exec();
+  }
+
+  // find by parentId
+  async findByParentId(parentId: string): Promise<TreatmentHistory[]> {
+
+    // find all students associated with the parent
+    const parentStudents = await this.studentService.findByParentId(parentId);
+    if (!parentStudents || parentStudents.length === 0) {
+      throw new NotFoundException(`No students found for parent ID ${parentId}`);
+    }
+
+    // find all treatment histories for those students
+    const treatmentHistories = await this.treatmentHistoryModel
+      .find({ student: { $in: parentStudents.map((student) => student._id) } })
+      .populate('staff')
+      .exec();
+
+    return treatmentHistories;
   }
 
   async update(
@@ -69,7 +95,6 @@ export class TreatmentHistoryService {
       .findByIdAndUpdate(id, updateTreatmentHistoryDto, { new: true })
       .populate('student')
       .populate('staff')
-      .populate('record')
       .exec();
 
     if (!updatedTreatmentHistory) {
@@ -89,5 +114,24 @@ export class TreatmentHistoryService {
     }
 
     return deletedTreatmentHistory;
+  }
+
+  // UpdateTreatmentStatusDto
+  async updateStatus(
+    id: string,
+    updateTreatmentStatusDto: UpdateTreatmentStatusDto,
+  ): Promise<TreatmentHistory> {
+    console.log(updateTreatmentStatusDto);
+    const updatedTreatmentHistory = await this.treatmentHistoryModel
+      .findByIdAndUpdate(id, updateTreatmentStatusDto, { new: true })
+      .populate('student')  
+      .populate('staff')
+      .exec();
+
+    if (!updatedTreatmentHistory) {
+      throw new NotFoundException(`Treatment history with ID ${id} not found`);
+    }
+
+    return updatedTreatmentHistory;
   }
 }

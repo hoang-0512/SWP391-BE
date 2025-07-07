@@ -1,29 +1,52 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Document, Schema as MongooseSchema } from 'mongoose';
+import { Document, Types } from 'mongoose';
 
 @Schema()
 export class TreatmentHistory extends Document {
-  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Student', required: true })
-  student: MongooseSchema.Types.ObjectId;
+  @Prop({ required: true, trim: true })
+  title: string;
 
-  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Staff', required: true })
-  staff: MongooseSchema.Types.ObjectId;
+  @Prop({ type: Types.ObjectId, ref: 'Student', required: true })
+  student: Types.ObjectId;
 
-  @Prop({
-    type: MongooseSchema.Types.ObjectId,
-    ref: 'HealthRecord',
-    required: true,
-  })
-  record: MongooseSchema.Types.ObjectId;
+  @Prop({ type: Types.ObjectId, ref: 'Staff', required: false })
+  staff: Types.ObjectId;
 
-  @Prop({ required: true })
-  date: Date;
+ @Prop({ default: Date.now })
+date: Date;
 
-  @Prop({ trim: true, required: true })
+  @Prop({ required: true, trim: true })
+  class: string;
+
+  @Prop({ required: true, trim: true })
   description: string;
 
-  @Prop({ trim: true, required: false })
-  notes: string;
+  @Prop({ required: true, trim: true })
+  location: string;
+
+  @Prop({ required: true, trim: true })
+  contactStatus: string;
+
+  @Prop({ required: true, trim: true })
+  priority: string;
+
+  // Các thuộc tính mới cho việc cập nhật trạng thái điều trị
+  @Prop({ required: false, trim: true })
+  actionTaken?: string;
+
+  @Prop({ required: false, default: false })
+  contactParent?: boolean;
+
+  @Prop({ required: false, trim: true })
+  notes?: string;
+
+  @Prop({
+    required: false,
+    trim: true,
+    enum: ['pending', 'processing', 'resolved'],
+    default: 'processing'
+  })
+  status?: string;
 }
 
 export const TreatmentHistorySchema =

@@ -32,8 +32,13 @@ export class OtpService {
     await otpRecord.save();
     console.log(`OTP for ${email}: ${otp}`); // Log OTP for debugging
     // Gửi OTP qua email
-    await this.mailService.sendOtpMail(email, otp);
-
+    try {
+      await this.mailService.sendOtpMail(email, otp);
+    } catch (error) {
+      console.error(`Failed to send OTP to ${email}:`, error);
+    }
+    
+     
     return otp;
   }
 

@@ -20,5 +20,5 @@ export class MailService {
       text: `Your OTP code is: ${otp}`,
       html: `<b>Your OTP code is: ${otp}</b>`,
     });
-  }
+  };
 }
