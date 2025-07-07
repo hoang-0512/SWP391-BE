@@ -6,7 +6,7 @@ export type FeedbackDocument = Feedback & Document;
 
 @Schema({ timestamps: true })
 export class Feedback extends Document {
-  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Parent', required: true })
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'User', required: true })
   parent: MongooseSchema.Types.ObjectId;
 
   @Prop({ required: true, trim: true })
@@ -16,10 +16,19 @@ export class Feedback extends Document {
   description: string;
 
   @Prop({ trim: true, default: null })
+  category: string; // Loại thắc mắc: illness, nutrition, development, mental, prevention, other
+
+  @Prop({ trim: true, default: null })
   response: string;
 
   @Prop({ enum: FeedbackStatus, default: FeedbackStatus.PENDING })
-  status: boolean;
+  status: string;
+
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'User' })
+  respondedBy: MongooseSchema.Types.ObjectId; // Nhân viên đã trả lời
+
+  @Prop({ default: Date.now })
+  respondedAt: Date;
 
   @Prop({ default: Date.now })
   created_at: Date;
