@@ -133,8 +133,10 @@ export class HealthExaminationController {
     @Query('staffId') staffId?: string,
   ) {
     try {
+      // Giải mã eventId nếu FE có encodeURIComponent
+      const decodedEventId = decodeURIComponent(eventId);
       const eventDetail =
-        await this.healthExaminationService.getHealthExaminationEventDetail(eventId);
+        await this.healthExaminationService.getHealthExaminationEventDetail(decodedEventId);
       return eventDetail;
     } catch (error) {
       throw new BadRequestException('Không thể lấy chi tiết sự kiện khám sức khỏe');
@@ -153,8 +155,10 @@ export class HealthExaminationController {
     @Query('staffId') staffId?: string,
   ) {
     try {
+      // Giải mã eventId nếu FE có encodeURIComponent
+      const decodedEventId = decodeURIComponent(eventId);
       const classDetail = await this.healthExaminationService.getHealthExaminationClassDetail(
-        eventId,
+        decodedEventId,
         classId,
       );
       return classDetail;
