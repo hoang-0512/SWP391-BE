@@ -4,6 +4,8 @@ import {
   ConflictException,
   BadRequestException,
   InternalServerErrorException,
+  Inject,
+  forwardRef,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
@@ -16,6 +18,7 @@ import { ParentService } from '@/services/parent.service';
 import { HealthRecordService } from './health-record.service';
 import { ClassService } from './class.service';
 import { UserDocument } from '@/schemas/user.schema';
+import { ParentStudentService } from './parent-student.service';
 
 @Injectable()
 export class StudentService {
@@ -25,6 +28,8 @@ export class StudentService {
     private healthRecordService: HealthRecordService,
     private classService: ClassService,
     @InjectModel('User') private userModel: Model<UserDocument>,
+    @Inject(forwardRef(() => ParentStudentService))
+    private parentStudentService: ParentStudentService,
   ) {}
   async create(createStudentDto: CreateStudentDto): Promise<Student> {
     try {
@@ -37,8 +42,21 @@ export class StudentService {
         throw new ConflictException(`Mã sinh viên ${createStudentDto.studentId} đã tồn tại`);
       }
 
-      // Find class by name
-      const classDoc = await this.classService.findByName(createStudentDto.class);
+      // Find class by ID or name
+      let classDoc: any;
+
+      // Try to find by ID first (if it's a valid ObjectId)
+      if (createStudentDto.class.match(/^[0-9a-fA-F]{24}$/)) {
+        classDoc = await this.classService.findById(createStudentDto.class);
+        console.log('Found class by ID:', classDoc ? classDoc.name : 'Not found');
+      }
+
+      // If not found by ID, try to find by name
+      if (!classDoc) {
+        classDoc = await this.classService.findByName(createStudentDto.class);
+        console.log('Found class by name:', classDoc ? classDoc.name : 'Not found');
+      }
+
       if (!classDoc) {
         throw new NotFoundException(`Không tìm thấy lớp ${createStudentDto.class}`);
       }
@@ -84,6 +102,34 @@ export class StudentService {
 
       const createdStudent = new this.studentModel(studentData);
       const savedStudent = await createdStudent.save();
+
+      // Create parent-student relationship
+      try {
+        await this.parentStudentService.create({
+          parent: parent._id.toString(),
+          student: (savedStudent._id as any).toString(),
+        });
+        console.log(
+          `Created parent-student relationship: parent ${parent._id} <-> student ${savedStudent._id}`,
+        );
+      } catch (relationError) {
+        console.error('Error creating parent-student relationship:', relationError);
+        // Don't throw error here, continue with student creation
+        // The relationship can be created manually later if needed
+      }
+
+      // Create default health record for the new student
+      try {
+        await this.healthRecordService.create({
+          student_id: (savedStudent._id as any).toString(),
+          // All other fields will be undefined by default as per DTO
+        });
+        console.log(`Created default health record for student ${savedStudent._id}`);
+      } catch (healthRecordError) {
+        console.error('Error creating default health record:', healthRecordError);
+        // Don't throw error here, continue with student creation
+        // The health record can be created manually later if needed
+      }
 
       // Return populated student data
       const student = await this.studentModel
@@ -290,13 +336,64 @@ export class StudentService {
     return updatedStudent;
   }
   async delete(id: string): Promise<Student> {
-    const deletedStudent = await this.studentModel.findByIdAndDelete(id).exec();
+    try {
+      // First, check if student exists
+      const studentToDelete = await this.studentModel.findById(id).exec();
+      if (!studentToDelete) {
+        throw new NotFoundException(`Sinh viên với ID "${id}" không tìm thấy`);
+      }
 
-    if (!deletedStudent) {
-      throw new NotFoundException(`Sinh viên với ID "${id}" không tìm thấy`);
+      console.log(`Deleting student ${id} and related data...`);
+
+      // Delete all parent-student relationships for this student
+      try {
+        const parentStudentRelations = await this.parentStudentService.findByStudentId(id);
+        console.log(
+          `Found ${parentStudentRelations.length} parent-student relationships to delete`,
+        );
+
+        for (const relation of parentStudentRelations) {
+          await this.parentStudentService.remove((relation as any)._id.toString());
+          console.log(`Deleted parent-student relationship: ${(relation as any)._id}`);
+        }
+      } catch (error) {
+        console.error('Error deleting parent-student relationships:', error);
+        // Continue with student deletion even if parent-student deletion fails
+        // This prevents orphaned students but logs the error
+      }
+
+      // Delete health records associated with this student
+      try {
+        const healthRecords = await this.healthRecordService.findByStudentId(id);
+        if (healthRecords && Array.isArray(healthRecords)) {
+          for (const record of healthRecords) {
+            await this.healthRecordService.remove((record as any)._id.toString());
+          }
+          console.log(`Deleted ${healthRecords.length} health records for student ${id}`);
+        }
+      } catch (error) {
+        console.error('Error deleting health records:', error);
+        // Continue with student deletion
+      }
+
+      // Finally, delete the student
+      const deletedStudent = await this.studentModel.findByIdAndDelete(id).exec();
+
+      if (!deletedStudent) {
+        throw new NotFoundException(`Failed to delete student with ID "${id}"`);
+      }
+
+      console.log(`Successfully deleted student ${id}`);
+      return deletedStudent;
+    } catch (error) {
+      console.error(`Error during cascade delete for student ${id}:`, error);
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+      throw new InternalServerErrorException(
+        `Failed to delete student and related data: ${error.message}`,
+      );
     }
-
-    return deletedStudent;
   }
   async batchDelete(ids: string[]): Promise<{
     successful: string[];
@@ -310,29 +407,30 @@ export class StudentService {
       failed: [],
     };
 
-    // Process each ID
+    console.log(`Starting batch delete for ${ids.length} students...`);
+
+    // Process each ID using the cascade delete method
     for (const id of ids) {
       try {
-        const deletedStudent = await this.studentModel.findByIdAndDelete(id).exec();
-
-        if (!deletedStudent) {
-          result.failed.push({
-            id,
-            reason: `Sinh viên với ID "${id}" không tìm thấy`,
-          });
-        } else {
-          result.successful.push(id);
-        }
+        await this.delete(id); // Use our cascade delete method
+        result.successful.push(id);
+        console.log(`Successfully deleted student ${id} with cascade`);
       } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
         result.failed.push({
           id,
-          reason: error.message || 'Lỗi không xác định',
+          reason: errorMessage,
         });
+        console.error(`Failed to delete student ${id}:`, errorMessage);
       }
     }
 
+    console.log(
+      `Batch delete completed. Success: ${result.successful.length}, Failed: ${result.failed.length}`,
+    );
     return result;
   }
+
   async batchUpdate(updates: { id: string; data: UpdateStudentDto }[]): Promise<{
     successful: Student[];
     failed: { id: string; data: UpdateStudentDto; reason: string }[];

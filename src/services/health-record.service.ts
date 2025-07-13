@@ -188,7 +188,22 @@ export class HealthRecordService {
     const record = await this.healthRecordModel.findOne({ student_id: studentId }).exec();
 
     if (!record) {
-      return null;
+      // Trả về object mặc định nếu chưa có health record
+      return {
+        _id: undefined,
+        student_id: studentId,
+        allergies: undefined,
+        chronic_conditions: undefined,
+        height: undefined,
+        weight: undefined,
+        vision: undefined,
+        hearing: undefined,
+        blood_type: undefined,
+        treatment_history: undefined,
+        notes: undefined,
+        created_at: undefined,
+        updated_at: undefined,
+      };
     }
 
     return this.formatHealthRecordResponse(record);

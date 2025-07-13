@@ -2,7 +2,11 @@ import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document, Schema as MongooseSchema } from 'mongoose';
 
 export type ParentStudentDocument = ParentStudent & Document;
-@Schema({ versionKey: false })
+
+@Schema({
+  versionKey: false,
+  timestamps: true, // Add timestamps
+})
 export class ParentStudent extends Document {
   @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Parent', required: true })
   parent: MongooseSchema.Types.ObjectId;
@@ -12,3 +16,6 @@ export class ParentStudent extends Document {
 }
 
 export const ParentStudentSchema = SchemaFactory.createForClass(ParentStudent);
+
+// Add compound index to prevent duplicate relationships
+ParentStudentSchema.index({ parent: 1, student: 1 }, { unique: true });

@@ -1,7 +1,13 @@
 import { Parent } from '@/schemas/parent.schema';
-import { Injectable, NotFoundException, Inject, forwardRef } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  Inject,
+  forwardRef,
+  BadRequestException,
+} from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
 import { ParentStudent, ParentStudentDocument } from '@/schemas/parent-student.schema';
 import { CreateParentStudentDto } from '@/decorations/dto/create-parent-student.dto';
 import { UpdateParentStudentDto } from '@/decorations/dto/update-parent-student.dto';
@@ -9,6 +15,7 @@ import { StudentService } from './student.service';
 import { HealthRecordService } from './health-record.service';
 import { ParentService } from './parent.service';
 import path from 'path';
+import { UserService } from './user.service';
 
 @Injectable()
 export class ParentStudentService {
@@ -18,11 +25,74 @@ export class ParentStudentService {
     @Inject(forwardRef(() => HealthRecordService))
     private healthRecordService: HealthRecordService,
     private parentService: ParentService,
+    private userService: UserService,
+    @Inject(forwardRef(() => StudentService))
+    private studentService: StudentService,
   ) {}
 
   async create(createParentStudentDto: CreateParentStudentDto): Promise<ParentStudent> {
-    const createdParentStudent = new this.parentStudentModel(createParentStudentDto);
-    return createdParentStudent.save();
+    console.log('Creating parent-student relationship with data:', createParentStudentDto);
+
+    // Validate ObjectId formats
+    if (!Types.ObjectId.isValid(createParentStudentDto.parent)) {
+      throw new BadRequestException(`Invalid parent ID format: ${createParentStudentDto.parent}`);
+    }
+
+    if (!Types.ObjectId.isValid(createParentStudentDto.student)) {
+      throw new BadRequestException(`Invalid student ID format: ${createParentStudentDto.student}`);
+    }
+
+    // Check if parent exists
+    try {
+      const parentExists = await this.parentService.findById(createParentStudentDto.parent);
+      if (!parentExists) {
+        throw new BadRequestException(`Parent with ID ${createParentStudentDto.parent} not found`);
+      }
+      console.log('Parent found:', parentExists);
+    } catch (error) {
+      console.error('Error finding parent:', error);
+      throw new BadRequestException(`Parent with ID ${createParentStudentDto.parent} not found`);
+    }
+
+    // Check if student exists
+    try {
+      const studentExists = await this.studentService.findById(createParentStudentDto.student);
+      if (!studentExists) {
+        throw new BadRequestException(
+          `Student with ID ${createParentStudentDto.student} not found`,
+        );
+      }
+      console.log('Student found:', studentExists);
+    } catch (error) {
+      console.error('Error finding student:', error);
+      throw new BadRequestException(`Student with ID ${createParentStudentDto.student} not found`);
+    }
+
+    // Check if relationship already exists
+    const existingRelationship = await this.parentStudentModel.findOne({
+      parent: createParentStudentDto.parent,
+      student: createParentStudentDto.student,
+    });
+
+    if (existingRelationship) {
+      throw new BadRequestException('Parent-student relationship already exists');
+    }
+
+    // Create the relationship with explicit ObjectId conversion
+    const relationshipData = {
+      parent: new Types.ObjectId(createParentStudentDto.parent),
+      student: new Types.ObjectId(createParentStudentDto.student),
+    };
+
+    console.log('Creating relationship with data:', relationshipData);
+
+    const createdParentStudent = new this.parentStudentModel(relationshipData);
+    const savedRelationship = await createdParentStudent.save();
+
+    console.log('Saved parent-student relationship:', savedRelationship);
+
+    // Return populated result
+    return savedRelationship.populate(['parent', 'student']);
   }
 
   async findAll(): Promise<ParentStudent[]> {
@@ -73,6 +143,29 @@ export class ParentStudentService {
   }
 
   /**
+   * Tạo parent-student từ parent email và studentId
+   */
+  async createByParentEmail(parentEmail: string, studentId: string): Promise<ParentStudent> {
+    // 1. Tìm user theo email
+    const user = await this.userService.findByEmail(parentEmail);
+    const userId = (user as any)?._id?.toString();
+    if (!user || !userId) {
+      throw new NotFoundException(`Không tìm thấy user với email ${parentEmail}`);
+    }
+    // 2. Tìm parent profile theo userId
+    const parent = await this.parentService.findByUserId(userId);
+    if (!parent || !(parent as any)._id) {
+      throw new NotFoundException(`Không tìm thấy parent profile cho user ${parentEmail}`);
+    }
+    // 3. Tạo parent-student
+    const createdParentStudent = new this.parentStudentModel({
+      parent: (parent as any)._id,
+      student: studentId,
+    });
+    return createdParentStudent.save();
+  }
+
+  /**
    * Find all students for a parent including their health records
    */
   async findByUserId(userId: string): Promise<any[]> {
@@ -89,7 +182,7 @@ export class ParentStudentService {
           path: 'class',
           select: 'name',
         },
-  })
+      })
       .populate('parent')
       .lean() // <-- Add lean() to get plain JS objects
       .exec();
@@ -100,6 +193,14 @@ export class ParentStudentService {
       parentStudents.map(async (ps: any) => {
         const student = ps.student;
         const parentObj = ps.parent;
+        if (!student || !student._id) {
+          // Log bản ghi bị loại bỏ
+          console.warn(
+            '[ParentStudentService] Bỏ qua parent-student vì student null hoặc thiếu _id:',
+            ps,
+          );
+          return null;
+        }
         const healthRecord = await this.healthRecordService.getHealthRecordsByStudentId(
           student._id.toString(),
         );
@@ -111,6 +212,7 @@ export class ParentStudentService {
         };
       }),
     );
-    return studentsWithHealthRecords;
+    // Lọc bỏ các phần tử null (nếu có)
+    return studentsWithHealthRecords.filter(Boolean);
   }
 }

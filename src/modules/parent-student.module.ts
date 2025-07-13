@@ -6,13 +6,15 @@ import { ParentStudentController } from '@/controllers/parent-student.controller
 import { StudentModule } from './student.module';
 import { HealthRecordModule } from './health-record.module';
 import { ParentModule } from './parent.module';
+import { UserModule } from './user.module';
 
 @Module({
   imports: [
     MongooseModule.forFeature([{ name: ParentStudent.name, schema: ParentStudentSchema }]),
     forwardRef(() => StudentModule),
-    HealthRecordModule,
-    ParentModule
+    forwardRef(() => HealthRecordModule),
+    ParentModule,
+    UserModule,
   ],
   controllers: [ParentStudentController],
   providers: [ParentStudentService],

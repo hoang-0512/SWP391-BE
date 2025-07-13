@@ -272,6 +272,7 @@ export class VaccinationScheduleService {
       vaccination_date: new Date(date),
       vaccination_time: time,
       location: location,
+      vaccine_type: vaccinations[0]?.vaccine_type || null,
       classes: Array.from(classesMap.values()).sort((a, b) => a.grade_level - b.grade_level),
     };
   }
