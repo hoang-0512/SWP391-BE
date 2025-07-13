@@ -547,21 +547,28 @@ export class HealthExaminationService {
   }
 
   async getHealthExaminationClassDetail(eventId: string, classId: string) {
+    console.log('getHealthExaminationClassDetail called with:', { eventId, classId });
+
     // Parse event ID to extract examination details
     const [title, date, time, location] = eventId.split('_');
+    console.log('Parsed eventId parts:', { title, date, time, location });
 
     if (!title || !date || !time || !location) {
+      console.error('Invalid event ID format:', eventId);
       throw new BadRequestException('Invalid event ID format');
     }
 
     // Find all examinations for this event and class
+    const query = {
+      title: title,
+      examination_date: new Date(date),
+      examination_time: time,
+      location: location,
+    };
+    console.log('Query for examinations:', query);
+
     const examinations = await this.healthExaminationModel
-      .find({
-        title: title,
-        examination_date: new Date(date),
-        examination_time: time,
-        location: location,
-      })
+      .find(query)
       .populate({
         path: 'student_id',
         populate: {
@@ -572,6 +579,8 @@ export class HealthExaminationService {
       .populate('created_by')
       .sort({ created_at: -1 });
 
+    console.log('Found examinations count:', examinations.length);
+
     if (!examinations.length) {
       throw new NotFoundException('No health examinations found for this event');
     }
@@ -580,10 +589,20 @@ export class HealthExaminationService {
     const classStudents = examinations.filter((exam) => {
       if (exam.student_id && typeof exam.student_id === 'object') {
         const studentData = exam.student_id as any;
-        return studentData.class && studentData.class._id.toString() === classId;
+        const studentClassId = studentData.class?._id?.toString();
+        const matches = studentClassId === classId;
+        console.log('Student class check:', {
+          studentClassId,
+          classId,
+          matches,
+          studentName: studentData.full_name || studentData.name,
+        });
+        return matches;
       }
       return false;
     });
+
+    console.log('Filtered class students count:', classStudents.length);
 
     if (!classStudents.length) {
       throw new NotFoundException('No students found for this class in the event');
@@ -592,6 +611,10 @@ export class HealthExaminationService {
     // Get class information from the first student
     const firstStudent = classStudents[0].student_id as any;
     const classInfo = firstStudent.class;
+    console.log('Class info:', classInfo);
+
+    // Lấy loại khám từ examination đầu tiên
+    const examinationType = examinations[0]?.examination_type || null;
 
     // Group students by status
     const statusCounts = {
@@ -633,7 +656,7 @@ export class HealthExaminationService {
       };
     });
 
-    return {
+    const result = {
       event_id: eventId,
       class_id: classId,
       class_info: {
@@ -646,6 +669,7 @@ export class HealthExaminationService {
         examination_date: new Date(date),
         examination_time: time,
         location: location,
+        examination_type: examinationType,
       },
       statistics: {
         total_students: classStudents.length,
@@ -657,6 +681,9 @@ export class HealthExaminationService {
         return nameA.localeCompare(nameB);
       }),
     };
+
+    console.log('Returning class detail result:', result);
+    return result;
   }
 
   async delete(id: string) {
@@ -726,6 +753,261 @@ export class HealthExaminationService {
     } catch (error) {
       console.error('Error deleting event:', error);
       throw error;
+    }
+  }
+
+  async getConsultationAppointments(studentId?: string) {
+    try {
+      console.log('Getting consultation appointments for studentId:', studentId);
+
+      // Build query to find examinations with follow_up_required = true
+      const query: any = {
+        follow_up_required: true,
+      };
+
+      // If studentId is provided, filter by student
+      if (studentId) {
+        query.student_id = studentId;
+      }
+
+      console.log('Query:', JSON.stringify(query, null, 2));
+
+      const consultations = await this.healthExaminationModel
+        .find(query)
+        .populate([
+          { path: 'student_id', select: 'full_name student_id email phone' },
+          { path: 'created_by', select: 'name email' },
+        ])
+        .sort({ follow_up_date: 1, created_at: -1 });
+
+      console.log('Found consultations count:', consultations.length);
+      console.log(
+        'Raw consultations data:',
+        JSON.stringify(
+          consultations.map((c) => ({
+            id: c._id,
+            student_id: c.student_id,
+            created_by: c.created_by,
+            student_type: typeof c.student_id,
+            created_by_type: typeof c.created_by,
+          })),
+          null,
+          2,
+        ),
+      );
+
+      // Format the response
+      const formattedConsultations = consultations.map((consultation, index) => {
+        console.log(`Processing consultation ${index + 1}:`, {
+          id: consultation._id,
+          student_id: consultation.student_id,
+          created_by: consultation.created_by,
+          examination_notes: consultation.examination_notes?.substring(0, 100) + '...',
+        });
+
+        // Extract consultation details from examination_notes
+        let consultationTitle = 'Lịch hẹn tư vấn sức khỏe';
+        let consultationDoctor = consultation.doctor_name || 'Bác sĩ phụ trách';
+        let consultationTime = consultation.examination_time || 'Chưa xác định';
+        let consultationNotes = '';
+
+        // Parse consultation information from examination_notes
+        const notesRaw = consultation.examination_notes || '';
+        const lines = notesRaw.split('\n');
+        for (const line of lines) {
+          if (line.includes('Lịch hẹn tư vấn:')) {
+            consultationTitle = line.replace('Lịch hẹn tư vấn:', '').trim();
+          } else if (line.includes('Bác sĩ:')) {
+            consultationDoctor = line.replace('Bác sĩ:', '').trim();
+          } else if (line.includes('Giờ:')) {
+            consultationTime = line.replace('Giờ:', '').trim();
+          } else if (line.includes('Ghi chú:')) {
+            consultationNotes = line.replace('Ghi chú:', '').trim();
+          }
+        }
+
+        // Safe handling of student data
+        let studentData: any = null;
+        if (consultation.student_id) {
+          if (typeof consultation.student_id === 'object' && consultation.student_id !== null) {
+            studentData = {
+              _id: (consultation.student_id as any)?._id?.toString() || '',
+              full_name: (consultation.student_id as any)?.full_name || '',
+              student_id: (consultation.student_id as any)?.student_id || '',
+              email: (consultation.student_id as any)?.email || '',
+              phone: (consultation.student_id as any)?.phone || '',
+            };
+          } else if (typeof consultation.student_id === 'string') {
+            // If it's just an ID string, we'll need to populate it
+            studentData = {
+              _id: consultation.student_id,
+              full_name: 'Đang tải...',
+              student_id: '',
+              email: '',
+              phone: '',
+            };
+          }
+        }
+
+        // Safe handling of created_by data
+        let createdByData: any = null;
+        if (consultation.created_by) {
+          if (typeof consultation.created_by === 'object' && consultation.created_by !== null) {
+            createdByData = {
+              name: (consultation.created_by as any)?.name || '',
+              email: (consultation.created_by as any)?.email || '',
+            };
+          } else if (typeof consultation.created_by === 'string') {
+            createdByData = {
+              name: 'Đang tải...',
+              email: '',
+            };
+          }
+        }
+
+        const formattedConsultation = {
+          _id: consultation._id?.toString() || '',
+          consultation_title: consultationTitle,
+          consultation_date: consultation.follow_up_date || consultation.examination_date || null,
+          consultation_time: consultationTime,
+          consultation_doctor: consultationDoctor,
+          consultation_notes: consultationNotes,
+          student: studentData,
+          original_examination: {
+            title: consultation.title || '',
+            examination_date: consultation.examination_date || null,
+            examination_type: consultation.examination_type || '',
+            status: consultation.status || '',
+          },
+          created_by: createdByData,
+          created_at: consultation.created_at,
+          updated_at: consultation.updated_at,
+        };
+
+        console.log(`Formatted consultation ${index + 1}:`, {
+          id: formattedConsultation._id,
+          title: formattedConsultation.consultation_title,
+          student: formattedConsultation.student?.full_name || 'No student',
+        });
+
+        return formattedConsultation;
+      });
+
+      console.log('Returning formatted consultations:', formattedConsultations.length);
+      return formattedConsultations;
+    } catch (error) {
+      console.error('Error getting consultation appointments:', error);
+      console.error('Error stack:', error.stack);
+      throw error;
+    }
+  }
+
+  async scheduleConsultation(scheduleData: {
+    student_id: string;
+    title: string;
+    consultation_date: Date;
+    consultation_time: string;
+    doctor: string;
+    notes?: string;
+    created_by: string;
+  }) {
+    try {
+      console.log('Starting scheduleConsultation with data:', scheduleData);
+
+      // Validate required fields
+      if (!scheduleData.created_by) {
+        throw new BadRequestException('created_by is required');
+      }
+
+      if (!scheduleData.student_id) {
+        throw new BadRequestException('student_id is required');
+      }
+
+      // Verify student exists
+      console.log('Looking for student with ID:', scheduleData.student_id);
+      const student = await this.studentService.findById(scheduleData.student_id);
+      console.log('Student found:', student ? 'Yes' : 'No');
+
+      if (!student) {
+        throw new NotFoundException('Student not found');
+      }
+
+      // Find the original health examination record for this student
+      // Look for the most recent completed examination
+      const originalExamination = await this.healthExaminationModel
+        .findOne({
+          student_id: scheduleData.student_id,
+          status: { $in: [ExaminationStatus.COMPLETED, ExaminationStatus.APPROVED] },
+        })
+        .sort({ created_at: -1 });
+
+      if (!originalExamination) {
+        throw new NotFoundException('Không tìm thấy lịch khám sức khỏe của học sinh này');
+      }
+
+      console.log('Updating original examination record...');
+
+      // Update the original examination record
+      originalExamination.follow_up_required = true;
+      originalExamination.follow_up_date = scheduleData.consultation_date;
+
+      // Add consultation information to examination notes
+      const consultationNote =
+        `Lịch hẹn tư vấn: ${scheduleData.title}\n` +
+        `Bác sĩ: ${scheduleData.doctor}\n` +
+        `Ngày: ${scheduleData.consultation_date.toLocaleDateString('vi-VN')}\n` +
+        `Giờ: ${scheduleData.consultation_time}\n` +
+        `Ghi chú: ${scheduleData.notes || 'Không có'}`;
+
+      originalExamination.examination_notes = originalExamination.examination_notes
+        ? `${originalExamination.examination_notes}\n\n${consultationNote}`
+        : consultationNote;
+
+      originalExamination.updated_at = new Date();
+
+      const savedExamination = await originalExamination.save();
+      console.log('Consultation scheduled successfully:', savedExamination._id);
+
+      // Send notification to student/parent about the consultation
+      try {
+        console.log('Creating notification...');
+        await this.notificationService.createHealthExaminationNotification(
+          (savedExamination._id as Types.ObjectId).toString(),
+          scheduleData.student_id,
+          scheduleData.title,
+          `Lịch hẹn tư vấn với ${scheduleData.doctor} vào ${scheduleData.consultation_date.toLocaleDateString('vi-VN')} lúc ${scheduleData.consultation_time}`,
+          scheduleData.consultation_date,
+          scheduleData.consultation_time,
+        );
+        console.log('Notification created successfully');
+      } catch (notificationError) {
+        console.error('Error sending consultation notification:', notificationError);
+        // Continue with the process even if notification fails
+        // Don't throw error here, just log it
+      }
+
+      console.log('Populating consultation data...');
+      const result = await savedExamination.populate(['student_id']);
+      console.log('Schedule consultation completed successfully');
+      return result;
+    } catch (error) {
+      console.error('Error scheduling consultation:', error);
+      console.error('Error details:', {
+        message: error.message,
+        stack: error.stack,
+        name: error.name,
+      });
+
+      // Provide more specific error messages
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+
+      if (error.message && error.message.includes('Student not found')) {
+        throw new NotFoundException('Không tìm thấy học sinh');
+      }
+
+      throw new BadRequestException(`Không thể lập lịch hẹn tư vấn: ${error.message}`);
     }
   }
 }

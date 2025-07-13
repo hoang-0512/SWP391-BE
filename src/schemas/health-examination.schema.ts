@@ -13,6 +13,7 @@ export enum ExaminationType {
   PERIODIC_HEALTH = 'Khám sức khỏe định kỳ',
   DENTAL = 'Khám răng miệng',
   EYE = 'Khám mắt',
+  CONSULTATION = 'Tư vấn sức khỏe',
 }
 
 export type HealthExaminationDocument = HealthExamination & Document;

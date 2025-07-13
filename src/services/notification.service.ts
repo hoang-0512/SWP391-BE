@@ -145,30 +145,41 @@ export class NotificationService {
     examinationDate: Date,
     examinationTime: string,
   ): Promise<Notification> {
-    // Tìm parent của student
-    const student = await this.findStudentWithParent(studentId);
+    try {
+      // Tìm parent của student
+      const student = await this.findStudentWithParent(studentId);
 
-    if (!student || !student.parent) {
-      throw new NotFoundException('Không tìm thấy phụ huynh của học sinh');
+      if (!student) {
+        throw new NotFoundException('Không tìm thấy học sinh');
+      }
+
+      // Check if student has parent information
+      if (!student.parent || !student.parent._id) {
+        console.warn(`Student ${studentId} does not have parent information`);
+        throw new NotFoundException('Học sinh chưa có thông tin phụ huynh');
+      }
+
+      const content = `Thông báo lịch khám sức khỏe: ${title}`;
+      const notes = `${description}\nNgày khám: ${new Date(examinationDate).toLocaleDateString('vi-VN')}\nGiờ khám: ${examinationTime}`;
+
+      const notification = new this.notificationModel({
+        noti_campaign: examinationId,
+        campaign_type: 'HealthExamination',
+        parent: student.parent._id,
+        student: studentId,
+        content,
+        notes,
+        date: new Date(),
+        confirmation_status: 'Pending',
+        created_at: new Date(),
+        updated_at: new Date(),
+      });
+
+      return notification.save();
+    } catch (error) {
+      console.error('Error creating health examination notification:', error);
+      throw error;
     }
-
-    const content = `Thông báo lịch khám sức khỏe: ${title}`;
-    const notes = `${description}\nNgày khám: ${new Date(examinationDate).toLocaleDateString('vi-VN')}\nGiờ khám: ${examinationTime}`;
-
-    const notification = new this.notificationModel({
-      noti_campaign: examinationId,
-      campaign_type: 'HealthExamination',
-      parent: student.parent,
-      student: studentId,
-      content,
-      notes,
-      date: new Date(),
-      confirmation_status: 'Pending',
-      created_at: new Date(),
-      updated_at: new Date(),
-    });
-
-    return notification.save();
   }
 
   async createVaccinationNotification(

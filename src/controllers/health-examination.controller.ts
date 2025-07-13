@@ -9,16 +9,22 @@ import {
   Post,
   Query,
   UseGuards,
+  Req,
 } from '@nestjs/common';
-import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { ApiOperation, ApiResponse, ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { HealthExaminationService } from '@/services/health-examination.service';
 import { ExaminationStatus } from '@/schemas/health-examination.schema';
 import {
   CreateHealthExaminationDto,
   UpdateExaminationStatusDto,
+  ScheduleConsultationDto,
 } from '@/decorations/dto/health-examination.dto';
+import { JwtAuthGuard } from '@/guards/jwt-auth.guard';
 
+@ApiTags('health-examinations')
 @Controller('health-examinations')
+@ApiBearerAuth()
+@UseGuards(JwtAuthGuard)
 export class HealthExaminationController {
   constructor(private readonly healthExaminationService: HealthExaminationService) {}
 
@@ -187,6 +193,19 @@ export class HealthExaminationController {
     }
   }
 
+  @Get('consultations')
+  @ApiOperation({ summary: 'Get all consultation appointments' })
+  @ApiResponse({ status: 200, description: 'Consultation appointments retrieved successfully' })
+  async getConsultationAppointments(@Query('studentId') studentId?: string) {
+    try {
+      const consultations =
+        await this.healthExaminationService.getConsultationAppointments(studentId);
+      return consultations;
+    } catch (error) {
+      throw new BadRequestException('Không thể lấy danh sách lịch hẹn tư vấn');
+    }
+  }
+
   @Get(':id')
   async findOne(@Param('id') id: string) {
     return this.healthExaminationService.findOne(id);
@@ -200,6 +219,51 @@ export class HealthExaminationController {
   @Delete(':id')
   async delete(@Param('id') id: string) {
     return this.healthExaminationService.delete(id);
+  }
+
+  @Post('schedule-consultation')
+  @ApiOperation({ summary: 'Schedule a consultation for a student' })
+  @ApiResponse({ status: 201, description: 'Consultation scheduled successfully' })
+  async scheduleConsultation(
+    @Body() scheduleDto: ScheduleConsultationDto,
+    @Query('studentId') studentId: string,
+    @Req() req: any,
+  ) {
+    try {
+      console.log('Controller received request:', { scheduleDto, studentId });
+      console.log('Request headers:', req.headers);
+      console.log('Request user object:', req.user);
+      console.log('Request user type:', typeof req.user);
+      console.log('Request user keys:', req.user ? Object.keys(req.user) : 'null');
+
+      if (!studentId) {
+        throw new BadRequestException('studentId query parameter is required');
+      }
+
+      // Get staff ID from JWT token
+      const staffId = req.user?.user || req.user?.sub || req.user?.id;
+      console.log('Staff ID from token:', staffId);
+      console.log('Staff ID type:', typeof staffId);
+
+      if (!staffId) {
+        console.error('No staff ID found in JWT token');
+        console.error('Available user properties:', req.user);
+        throw new BadRequestException('Không tìm thấy thông tin người dùng trong token');
+      }
+
+      const result = await this.healthExaminationService.scheduleConsultation({
+        ...scheduleDto,
+        student_id: studentId,
+        created_by: staffId,
+      });
+      return result;
+    } catch (error) {
+      console.error('Controller error:', error);
+      if (error instanceof BadRequestException) {
+        throw error;
+      }
+      throw new BadRequestException('Không thể lập lịch hẹn tư vấn');
+    }
   }
 
   @Delete('events/:eventId')

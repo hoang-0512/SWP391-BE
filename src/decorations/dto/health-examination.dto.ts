@@ -67,3 +67,27 @@ export class UpdateExaminationStatusDto {
   @IsString()
   rejection_reason?: string;
 }
+
+export class ScheduleConsultationDto {
+  @ApiProperty({ example: 'Tư vấn về vấn đề sức khỏe' })
+  @IsString()
+  title: string;
+
+  @ApiProperty({ example: '2025-01-20' })
+  @IsDate()
+  @Type(() => Date)
+  consultation_date: Date;
+
+  @ApiProperty({ example: '14:30' })
+  @IsString()
+  consultation_time: string;
+
+  @ApiProperty({ example: 'Bác sĩ Nguyễn Văn A' })
+  @IsString()
+  doctor: string;
+
+  @ApiProperty({ example: 'Ghi chú cho buổi tư vấn', required: false })
+  @IsOptional()
+  @IsString()
+  notes?: string;
+}
